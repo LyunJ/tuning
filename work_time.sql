@@ -125,16 +125,44 @@ from user u
 where wt.user_id is null
 ;
 
--- anti semi join
+-- anti semi join 으로 변경
 -- 1s 294ms -> 400ms
-explain
+explain ANALYZE
 select u.name
 from user u
 where not exists(select 1
                  from work_time wt
                  where work_date between '2022-01-01' and '2022-01-31'
                    and hour(in_time) > 10
-                   and u.id = wt.user_id);
+                   and u.id = wt.user_id
+                 );
+
+-- 2022년 1월에 10번 이상 지각한 사람 이름 구하기
+-- 47ms
+explain analyze
+select u.name
+from user u inner join work_time wt on u.id = wt.user_id
+where work_date between '2022-01-01' and '2022-01-31'
+                   and hour(in_time) > 10
+group by user_id
+having count(*) >= 10;
+
+-- 47ms -> 42ms
+-- 별 차이가 없다.
+-- inner join 후 group by 한 번 수행, filtering 한 번 수행
+-- user record마다 group by, filtering 한 번 수행 loops=90001
+-- 무엇이 효율적인가?
+explain analyze
+select u.name
+from user u
+where exists(select 1
+                 from work_time wt
+                 where work_date between '2022-01-01' and '2022-01-31'
+                   and hour(in_time) > 10
+                   and u.id = wt.user_id
+                 group by user_id
+                 having count(*) >= 10);
+
 
 
 
