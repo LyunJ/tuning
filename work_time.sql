@@ -13,13 +13,14 @@ from (select user_id, hour(sum(TIMEDIFF(out_time, in_time))) as work_time
       having work_time < 160) wt
          inner join user on user.id = wt.user_id;
 
-
+-- foreign key와 primary key 삭제
 alter table work_time
     drop foreign key FK_user_TO_work_time_1;
 
-alter table work_time drop primary key;
+alter table work_time
+    drop primary key;
 
--- 8.52
+-- 8.52s
 alter table work_time partition by range (TO_DAYS(work_date))(
     partition p0 values less than (TO_DAYS('2018-02-01')),
     partition p1 values less than (TO_DAYS('2018-03-01')),
@@ -85,17 +86,19 @@ alter table work_time partition by range (TO_DAYS(work_date))(
     );
 
 -- local index 생성
-alter table work_time add index idx1_work_test (user_id);
-alter table work_time add index idx2_work_test (user_id, work_date);
-alter table work_time add index idx3_work_test (work_date, user_id);
+alter table work_time
+    add index idx1_work_test (user_id);
+alter table work_time
+    add index idx2_work_test (user_id, work_date);
+alter table work_time
+    add index idx3_work_test (work_date, user_id);
 
 
--- 2022년 1월에 달 160시간을 채우지 않은 사람 사번 구하기
--- 1 분 20 초
+-- 2022년 1월에 달 160시간을 채우지 않은 사람 사번과 일한 시간 구하기
 -- primary index인 (user_id, work_date) 사용
 -- work_date 2022년 1월인 사용자를 찾기 위해 index full scan
 -- 비효율 발생
--- 파티셔닝 후 1s 940ms
+-- 파티셔닝 후 1m 20s -> 1s 940ms
 -- Index scan on work_time using PRIMARY
 explain analyze
 select user.id, work_time as time
@@ -105,6 +108,35 @@ from (select user_id, hour(sum(TIMEDIFF(out_time, in_time))) as work_time
       group by user_id
       having work_time < 160) wt
          inner join user on user.id = wt.user_id;
+
+
+
+-- 2022년 1월에 한 번이라도 지각하지 않은 사람 이름 구하기
+-- 출근 시간 10시
+-- left join where is null
+-- 1s 294ms
+explain analyze
+select u.name
+from user u
+         left join (select distinct user_id
+                     from work_time
+                     where hour(in_time) > 10 and work_date between '2022-01-01' and '2022-01-31') wt
+                    on u.id = wt.user_id
+where wt.user_id is null
+;
+
+-- anti semi join
+-- 1s 294ms -> 400ms
+explain
+select u.name
+from user u
+where not exists(select 1
+                 from work_time wt
+                 where work_date between '2022-01-01' and '2022-01-31'
+                   and hour(in_time) > 10
+                   and u.id = wt.user_id);
+
+
 
 -- 1번 사원의 1달 근무 시간
 -- 66ms -> 33ms
